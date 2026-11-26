@@ -373,6 +373,28 @@ app.post("/api/paypal/webhook", async (req, res) => {
   }
 });
 
+// Pages PayPal sends the user to after checkout. They hand the user back to the app
+// through the pushlock:// deep link. Set RETURN_URL and CANCEL_URL to these two pages.
+function returnPage(title, text, deepLink) {
+  return `<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="1;url=${deepLink}">
+<title>${title}</title>
+<style>
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0c0f;color:#f4f6f8;font-family:system-ui,sans-serif;text-align:center}
+main{padding:32px;max-width:360px}h1{font-size:26px;margin:0 0 8px}p{color:#8a93a3;line-height:1.5}
+a{display:inline-block;margin-top:24px;padding:16px 28px;border-radius:16px;background:#c6ff3d;color:#0a0c0f;font-weight:700;text-decoration:none}
+</style></head><body><main><h1>${title}</h1><p>${text}</p>
+<a href="${deepLink}">Open Push-up Lock</a></main></body></html>`;
+}
+
+app.get("/subscribed", (_req, res) =>
+  res.type("html").send(returnPage("You're subscribed", "Thanks! Head back to the app to finish setting up.", "pushlock://subscribed"))
+);
+app.get("/cancelled", (_req, res) =>
+  res.type("html").send(returnPage("Checkout cancelled", "No charge was made. You can subscribe any time from the app.", "pushlock://cancelled"))
+);
+
 app.use((_req, res) => res.status(404).json({ error: "Not found" }));
 
 app.listen(PORT, () => {
