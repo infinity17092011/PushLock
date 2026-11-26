@@ -63,6 +63,25 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
+// ---------- Free access list ----------
+// Comma-separated emails that never need to pay, e.g. FREE_ACCESS_EMAILS=me@mail.com,friend@mail.com
+const FREE_EMAILS = new Set(
+  (process.env.FREE_ACCESS_EMAILS || "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean)
+);
+
+// Only counts if the email is confirmed, so nobody can claim free access
+// by signing up with an address they don't own.
+function isFree(user) {
+  return Boolean(user?.email && user.email_confirmed_at && FREE_EMAILS.has(user.email.toLowerCase()));
+}
+
+function freeStatus() {
+  return { has_access: true, status: "FREE", current_period_end: null, checked_at: new Date().toISOString() };
+}
+
 // ---------- PayPal helpers ----------
 let tokenCache = { value: null, expiresAt: 0 };
 
@@ -214,6 +233,7 @@ async function requireUser(req, res, next) {
   if (error || !data?.user) return res.status(401).json({ error: "Invalid token" });
 
   req.user = data.user;
+  req.free = isFree(data.user);
   next();
 }
 
@@ -221,6 +241,7 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 
 // Start a subscription: returns a PayPal approval URL for the app to open.
 app.post("/api/subscriptions/create", requireUser, async (req, res) => {
+  if (req.free) return res.status(409).json({ error: "Already subscribed", ...freeStatus() });
   try {
     const { data: existing } = await supabase
       .from("subscriptions")
@@ -274,6 +295,7 @@ app.post("/api/subscriptions/create", requireUser, async (req, res) => {
 
 // Current status from our database (fast; the app caches this).
 app.get("/api/subscriptions/status", requireUser, async (req, res) => {
+  if (req.free) return res.json(freeStatus());
   const { data, error } = await supabase
     .from("subscriptions")
     .select("*")
@@ -289,6 +311,7 @@ app.get("/api/subscriptions/status", requireUser, async (req, res) => {
 
 // Re-check with PayPal. Call this right after the user returns from checkout.
 app.post("/api/subscriptions/sync", requireUser, async (req, res) => {
+  if (req.free) return res.json(freeStatus());
   try {
     const { data: existing } = await supabase
       .from("subscriptions")
@@ -308,6 +331,7 @@ app.post("/api/subscriptions/sync", requireUser, async (req, res) => {
 
 // Cancel at the user's request. Access continues until the paid period ends.
 app.post("/api/subscriptions/cancel", requireUser, async (req, res) => {
+  if (req.free) return res.json(freeStatus());
   try {
     const { data: existing } = await supabase
       .from("subscriptions")
